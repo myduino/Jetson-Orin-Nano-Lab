@@ -17,8 +17,8 @@ The teacher puts each student on a Jetson and a camera, on the teacher page. The
 
 **1. On the teacher's PC (Windows or Mac):** no Python, no Git and no terminal. Download the app from the [latest release](https://github.com/myduino/Jetson-Orin-Nano-Lab/releases/latest):
 
-- Windows: [myduino-jetson-lab.exe](https://github.com/myduino/Jetson-Orin-Nano-Lab/releases/latest/download/myduino-jetson-lab.exe) (double-click; no install). If Windows asks about the network, choose Allow. If SmartScreen warns, choose More info, then Run anyway.
-- Mac with Apple chip (M1 or newer): [myduino-jetson-lab-mac-arm64.dmg](https://github.com/myduino/Jetson-Orin-Nano-Lab/releases/latest/download/myduino-jetson-lab-mac-arm64.dmg). Intel Mac: [myduino-jetson-lab-mac-x64.dmg](https://github.com/myduino/Jetson-Orin-Nano-Lab/releases/latest/download/myduino-jetson-lab-mac-x64.dmg). Open it and drag the app to Applications. The first time, right-click the app, choose Open, then Open again (the app is not signed). If the Mac says the app is "damaged", open Terminal and run `xattr -cr "/Applications/Myduino NVIDIA Jetson Orin Nano Lab.app"`, then open the app again.
+- Windows: [Myduino-Jetson-Orin-Nano-Lab.exe](https://github.com/myduino/Jetson-Orin-Nano-Lab/releases/latest/download/Myduino-Jetson-Orin-Nano-Lab.exe) (double-click; no install). If Windows asks about the network, choose Allow. If SmartScreen warns, choose More info, then Run anyway.
+- Mac with Apple chip (M1 or newer): [Myduino-Jetson-Orin-Nano-Lab-mac-arm64.dmg](https://github.com/myduino/Jetson-Orin-Nano-Lab/releases/latest/download/Myduino-Jetson-Orin-Nano-Lab-mac-arm64.dmg). Intel Mac: [Myduino-Jetson-Orin-Nano-Lab-mac-x64.dmg](https://github.com/myduino/Jetson-Orin-Nano-Lab/releases/latest/download/Myduino-Jetson-Orin-Nano-Lab-mac-x64.dmg). Open it and drag the app to Applications. The first time, the Mac says Apple could not verify it (the app is not notarized): click Done, open System Settings, Privacy & Security, scroll to Security and click Open Anyway. Or open Terminal once and run `xattr -cr "/Applications/Myduino Jetson Orin Nano Lab.app"`, then open the app.
 
 **2. Add each Jetson in the portal (no terminal on the Jetson).** Open the app: the window is the teacher portal. Under **Jetsons**, type the Jetson's IP address, user name and password (find the IP on the Jetson with `hostname -I`) and click **Add**. Then click **SETUP**. The app connects over SSH, downloads the course folder (only the student part) to `~/Jetson-Orin-Nano-Lab`, and runs `labs-setup.sh`, which installs JupyterLab and the lab agent (the agent starts by itself whenever the Jetson starts). The steps show live in the portal, and the Jetson turns **online** when it is done (a few minutes). The password is saved on the teacher PC so SETUP can be run again later (it updates the Jetson). The Jetson needs internet, the same network as the teacher PC, and SSH on (it is on by default).
 
@@ -28,7 +28,7 @@ By hand instead, on the Jetson: `git clone https://github.com/myduino/Jetson-Ori
 
 ## Every class
 
-1. Switch on the Jetsons (network cable or Wi-Fi) and plug in the cameras (up to 3 for each Jetson). Double-click **Myduino NVIDIA Jetson Orin Nano Lab** on your PC. The window is the teacher portal.
+1. Switch on the Jetsons (network cable or Wi-Fi) and plug in the cameras (up to 3 for each Jetson). Double-click **Myduino Jetson Orin Nano Lab** on your PC. The window is the teacher portal.
 2. Once, in the **Students** tab: make a class, add the students' names, and for each student choose the **Jetson** and the **camera**.
 3. Each time before the class: open the portal, go to **Students**, open the class tab and click **Start Lab**. The Jetsons start the Jupyter of that class's students, and each Jetson card shows who uses it.
 4. Tell each student their address and PIN: "Amira, awak masuk 192.168.0.234:8881, PIN 482913".
