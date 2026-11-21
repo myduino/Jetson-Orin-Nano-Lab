@@ -1,4 +1,4 @@
-# Course Map
+# Labs
 
 **Course:** Jetson Orin Nano Super — Applied AI and AIoT  
 **Version:** Revised 8 November 2026  

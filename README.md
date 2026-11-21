@@ -50,7 +50,7 @@ Outside those two folders there are only two things, because Linux needs them: t
 
 ## Course Flow
 
-The course has four parts and 42 labs (Lab 0 to Lab 41). The full list, with what each lab does, is in [COURSE_MAP.md](COURSE_MAP.md).
+The course has four parts and 42 labs (Lab 0 to Lab 41). The full list, with what each lab does, is in [LABS.md](LABS.md).
 
 | Part | Name | Labs |
 |---|---|---|
