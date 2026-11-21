@@ -85,7 +85,10 @@ Categories=Education;
 ICON
 cp ~/.local/share/applications/myduino-lab.desktop "$DESKTOP_DIR/Myduino Jetson Lab.desktop"
 chmod +x "$DESKTOP_DIR/Myduino Jetson Lab.desktop"
-gio set "$DESKTOP_DIR/Myduino Jetson Lab.desktop" metadata::trusted true 2>/dev/null || true
+# The desktop only starts an icon marked "trusted". This script may run over SSH, where there is no desktop session, so use a private one.
+ICONFILE="$DESKTOP_DIR/Myduino Jetson Lab.desktop"
+{ dbus-run-session -- gio set "$ICONFILE" metadata::trusted true || gio set "$ICONFILE" metadata::trusted true; } 2>/dev/null \
+  || echo "Could not mark the icon as trusted. On the Jetson: right-click the icon and choose Allow Launching."
 
 sudo systemctl daemon-reload
 sudo systemctl enable myduino-lab-agent > /dev/null 2>&1
