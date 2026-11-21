@@ -78,7 +78,7 @@ cat > ~/.local/share/applications/myduino-lab.desktop <<ICON
 Type=Application
 Name=Myduino Jetson Lab
 Comment=Open your JupyterLab
-Exec=xdg-open http://localhost:8870
+Exec=bash "$HERE/labs-student/open-lab.sh"
 Icon=$HERE/labs-student/myduino-icon.png
 Terminal=false
 Categories=Education;

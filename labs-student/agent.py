@@ -611,14 +611,21 @@ def launcher_page():
 
 
 class Launcher(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
+    def answer(self, with_body):
         code, headers, body = launcher_page()
         self.send_response(code)
         for k, v in headers.items():
             self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if with_body:
+            self.wfile.write(body)
+
+    def do_GET(self):
+        self.answer(True)
+
+    def do_HEAD(self):
+        self.answer(False)
 
     def log_message(self, *a):
         pass
