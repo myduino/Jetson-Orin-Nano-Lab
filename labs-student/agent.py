@@ -10,6 +10,8 @@ their folder (.venv), made by the agent the first time. Only the Python standard
 """
 import base64
 import glob
+import html
+import http.server
 import hashlib
 import json
 import os
@@ -33,6 +35,7 @@ DEV = os.environ.get("LAB_DEV", "/dev")
 MAX_LABS = 45                                                                     # lab0 ... lab44 folders in each student's folder
 NAME = re.compile(r"^[a-z0-9_]{1,20}$")
 GRACE = 15 * 60                                                         # seconds without the teacher before every student session is closed
+LAUNCH_PORT = 8870                                                      # the desktop icon opens http://localhost:8870 (this Jetson only)
 EVERY = 5                                                               # seconds between two reports
 
 running = {}          # key -> {"proc", "port", "pin", "camera", "started"}
@@ -590,6 +593,46 @@ def hello(cfg):
     return answer
 
 
+# ---------------------------------------------------------------- the desktop icon: opens the JupyterLab of the student who works at this Jetson
+def launcher_page():
+    """(status, headers, body) for the page the desktop icon opens. One student: straight into their JupyterLab."""
+    live = [(k, r) for k, r in list(running.items()) if r["proc"].poll() is None]
+    if len(live) == 1:
+        r = live[0][1]
+        return 302, {"Location": f"http://localhost:{r['port']}/lab?token={r['pin']}"}, b""
+    if not live:
+        text = "<h1>No lab yet</h1><p>Your teacher has not started a lab for you. Try again in a minute.</p>"
+    else:                                                                    # several students on this Jetson: each one signs in with their own PIN
+        links = "".join(f'<li><a href="http://localhost:{r["port"]}/">{html.escape(k.split("__", 1)[-1].replace("_", " ").title())}</a></li>' for k, r in live)
+        text = f"<h1>Who are you?</h1><ul>{links}</ul><p>Type your PIN on the next page.</p>"
+    page = ("<!doctype html><meta charset=utf-8><title>Myduino Lab</title><style>body{font:18px sans-serif;max-width:30em;margin:15vh auto;padding:0 1em}"
+            "a{font-size:1.2em}</style>" + text).encode()
+    return 200, {"Content-Type": "text/html; charset=utf-8"}, page
+
+
+class Launcher(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        code, headers, body = launcher_page()
+        self.send_response(code)
+        for k, v in headers.items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+def start_launcher():
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", LAUNCH_PORT), Launcher)   # localhost only: the PINs never leave this Jetson
+    except OSError as error:
+        log("desktop icon page not started:", error)
+        return
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+
 def main():
     try:
         cfg = json.load(open(CONFIG))
@@ -597,6 +640,7 @@ def main():
         sys.exit(f"No settings in {CONFIG}. Run labs-setup.sh <teacher address>.")
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
     log("agent started; teacher", cfg["teacher"])
+    start_launcher()
     shown = ""
     last_ok = time.time()
     try:

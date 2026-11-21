@@ -69,6 +69,23 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
+# The "Myduino Lab" icon (desktop and app menu): opens the JupyterLab of the student who works at this Jetson.
+DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo ~/Desktop)"
+mkdir -p ~/.local/share/applications "$DESKTOP_DIR"
+cat > ~/.local/share/applications/myduino-lab.desktop <<ICON
+[Desktop Entry]
+Type=Application
+Name=Myduino Lab
+Comment=Open your JupyterLab
+Exec=xdg-open http://localhost:8870
+Icon=$HERE/labs-student/myduino-icon.png
+Terminal=false
+Categories=Education;
+ICON
+cp ~/.local/share/applications/myduino-lab.desktop "$DESKTOP_DIR/Myduino Lab.desktop"
+chmod +x "$DESKTOP_DIR/Myduino Lab.desktop"
+gio set "$DESKTOP_DIR/Myduino Lab.desktop" metadata::trusted true 2>/dev/null || true
+
 sudo systemctl daemon-reload
 sudo systemctl enable myduino-lab-agent > /dev/null 2>&1
 sudo systemctl restart myduino-lab-agent

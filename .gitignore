@@ -7,5 +7,6 @@ __pycache__/
 alerts.csv
 .DS_Store
 labs-student/**/*.png
+!labs-student/myduino-icon.png
 labs-student/**/*.jpg
 labs-student/**/*.jpeg
