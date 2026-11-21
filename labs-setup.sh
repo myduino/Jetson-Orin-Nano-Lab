@@ -1,17 +1,16 @@
 #!/bin/bash
 # Run ONCE on each Jetson after cloning this folder:
-#     bash labs-setup.sh <teacher address:port> <class key> [name of this Jetson]
+#     bash labs-setup.sh <teacher address:port> [name of this Jetson]
 # Give each Jetson a different name (for example jetson-01). Without one the name is made from the host name and a short
 # code of this Jetson, because Jetsons flashed from the same image have the same host name.
-# The teacher page prints the exact line (for example:  bash labs-setup.sh 192.168.0.10:8800 1a2b3c4d).
+# The teacher page prints the exact line (for example:  bash labs-setup.sh 192.168.0.10:8800).
 # Needs internet. Safe to run again. It installs the lab agent. The agent starts by itself whenever the Jetson starts and
 # reports to the teacher page. When the teacher puts a student on this Jetson, the agent makes that student's own Python
 # environment (JupyterLab, 2 to 3 minutes) in the student's folder and starts their JupyterLab.
 # The rest of the setup (CuPy, PyTorch, Ultralytics) is done by each student in the Lab 0 notebook, where they can watch it.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEACHER="$1"; KEY="$2"; NAME="$3"
+TEACHER="$1"; NAME="$2"
 [ -n "$TEACHER" ] || read -r -p "Teacher page address (for example 192.168.0.10:8800): " TEACHER
-[ -n "$KEY" ] || read -r -p "Class key (shown on the teacher PC): " KEY
 case "$TEACHER" in *:*) ;; *) TEACHER="$TEACHER:8800" ;; esac
 if [ -z "$NAME" ]; then NAME="$(hostname | tr 'A-Z-' 'a-z_')_$(cut -c1-4 /etc/machine-id 2>/dev/null)"; fi
 NAME="$(printf '%s' "$NAME" | tr 'A-Z-' 'a-z_' | sed 's/[^a-z0-9_]/_/g' | cut -c1-20)"
@@ -52,7 +51,7 @@ echo "== 4. Power mode =="
 command -v nvpmodel > /dev/null && echo no | sudo nvpmodel -m 2 && echo "Power mode: MAXN SUPER (full speed after the next reboot)"
 
 echo "== 5. The lab agent =="
-printf '{"teacher": "%s", "key": "%s", "id": "%s"}\n' "$TEACHER" "$KEY" "$NAME" > ~/myduino-jetson-lab/.agent.json
+printf '{"teacher": "%s", "id": "%s"}\n' "$TEACHER" "$NAME" > ~/myduino-jetson-lab/.agent.json
 chmod 600 ~/myduino-jetson-lab/.agent.json
 sudo tee /etc/systemd/system/myduino-lab-agent.service > /dev/null <<UNIT
 [Unit]

@@ -582,7 +582,7 @@ def hello(cfg):
         "note": next(iter(m for _, m in failed.values()), "") or ("MQTT is not installed on this Jetson. Click Update on the Jetsons page." if running and not mqtt_ready() else "") or next(iter(f"Could not rename a class folder: {m}" for m in rename_failed.values()), ""),
     }
     req = urllib.request.Request(f"http://{cfg['teacher']}/agent/hello", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "X-Key": cfg["key"]})
+                                 headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=6) as r:
         answer = json.load(r)
     del deleted[:]
@@ -594,7 +594,7 @@ def main():
     try:
         cfg = json.load(open(CONFIG))
     except (OSError, ValueError):
-        sys.exit(f"No settings in {CONFIG}. Run labs-setup.sh <teacher address> <class key>.")
+        sys.exit(f"No settings in {CONFIG}. Run labs-setup.sh <teacher address>.")
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
     log("agent started; teacher", cfg["teacher"])
     shown = ""
