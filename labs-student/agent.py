@@ -441,6 +441,37 @@ def mqtt_stop(proc):
 
 # ---------------------------------------------------------------- progress: read from the students' saved notebooks
 progress_at, progress_last = 0, {}
+sizes = {}            # "class__student" -> megabytes, measured in the background (du on a Python environment takes seconds)
+
+
+def folder_keys():
+    """class__student of every student folder on this Jetson, known to the teacher or not."""
+    out = []
+    try:
+        for c in sorted(os.listdir(ROOT)):
+            if NAME.match(c) and os.path.isdir(os.path.join(ROOT, c)):
+                out += [f"{c}__{n}" for n in sorted(os.listdir(os.path.join(ROOT, c))) if NAME.match(n) and os.path.isdir(os.path.join(ROOT, c, n))]
+    except OSError:
+        pass
+    return out
+
+
+def measure_sizes():
+    while True:
+        try:
+            keys = folder_keys()
+            for k in list(sizes):
+                if k not in keys:
+                    del sizes[k]
+            for k in keys:
+                cls, stu = k.split("__", 1)
+                out = subprocess.run(["du", "-sm", os.path.join(ROOT, cls, stu)], capture_output=True, text=True, timeout=300).stdout.split()
+                if out:
+                    sizes[k] = int(out[0])
+        except Exception:
+            pass
+        time.sleep(300)
+
 progress_cache = {}     # notebook path -> (mtime, done, total, errors)
 
 
@@ -581,7 +612,7 @@ def hello(cfg):
     body = {
         "id": cfg.get("id") or re.sub(r"[^a-z0-9_]", "_", socket.gethostname().lower()), "ip": MQTT_HOST[0], "cameras": cameras(),
         "running": [{"key": k, "port": r["port"], "alive": r["proc"].poll() is None} for k, r in running.items()],
-        "progress": progress_last, "live": live_report(), "deleted": list(deleted), "renamed": list(renamed), "preparing": list(preparing), "ready": True, "course": course_version(), "stats": stats(), "desktop": desktop_on(),
+        "folders": [{"key": k, "mb": sizes.get(k, 0)} for k in folder_keys()], "progress": progress_last, "live": live_report(), "deleted": list(deleted), "renamed": list(renamed), "preparing": list(preparing), "ready": True, "course": course_version(), "stats": stats(), "desktop": desktop_on(),
         "note": next(iter(m for _, m in failed.values()), "") or ("MQTT is not installed on this Jetson. Click Update on the Jetsons page." if running and not mqtt_ready() else "") or next(iter(f"Could not rename a class folder: {m}" for m in rename_failed.values()), ""),
     }
     req = urllib.request.Request(f"http://{cfg['teacher']}/agent/hello", data=json.dumps(body).encode(),
@@ -648,6 +679,7 @@ def main():
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
     log("agent started; teacher", cfg["teacher"])
     start_launcher()
+    threading.Thread(target=measure_sizes, daemon=True).start()
     shown = ""
     last_ok = time.time()
     try:
