@@ -162,9 +162,12 @@ def migrate_lab_numbers(home):
         f.write("2\n")
 
 
-def prepare(home):
+def prepare(home, labs=None):
+    """labs: the numbers of the labs of the package of this teacher (None: every lab of the course)."""
     migrate_lab_numbers(home)
     for n in range(MAX_LABS):
+        if labs is not None and n not in labs:
+            continue
         os.makedirs(os.path.join(home, f"lab{n}"), exist_ok=True)
     for d in ("models", ".jupyter", ".ipython", ".config", ".tmp"):
         os.makedirs(os.path.join(home, d), exist_ok=True)
@@ -189,7 +192,7 @@ def prepare(home):
         with open(pth, "w") as f:
             f.write(os.path.join(HERE, "labs-student") + "\n")
     shutil.copyfile(os.path.join(HERE, "labs-student", "start_here.ipynb"), os.path.join(home, "Start_Here.ipynb"))
-    sync_notebooks(home)
+    sync_notebooks(home, labs)
 
 
 def file_hash(path):
@@ -199,23 +202,25 @@ def file_hash(path):
     return h.hexdigest()
 
 
-def sync_notebooks(home):
+def sync_notebooks(home, labs=None):
     """Gives the student the notebooks of the course. A new lab is copied. A notebook the student never changed is replaced by the newer
     version of the course. A notebook the student changed is kept as it is, and the newer version is added next to it as "<name> (new).ipynb"."""
-    labs = os.path.join(HERE, "labs-student")
+    course = os.path.join(HERE, "labs-student")
     book = os.path.join(home, ".delivered.json")                   # what the student was given: file -> {"sent": hash of that version, "new": hash of the newer version put next to it}
     try:
         given = json.load(open(book))
     except (OSError, ValueError):
         given = {}
-    for folder in sorted(os.listdir(labs)):
+    for folder in sorted(os.listdir(course)):
         m = re.match(r"lab(\d{1,2})_", folder)
-        if not m or not os.path.isdir(os.path.join(labs, folder)):
+        if not m or not os.path.isdir(os.path.join(course, folder)):
             continue
-        for f in os.listdir(os.path.join(labs, folder)):
+        if labs is not None and int(m.group(1)) not in labs:
+            continue                                                # a lab that is not in the package
+        for f in os.listdir(os.path.join(course, folder)):
             if not f.endswith(".ipynb"):
                 continue
-            src, dest = os.path.join(labs, folder, f), os.path.join(home, f"lab{m.group(1)}", f)
+            src, dest = os.path.join(course, folder, f), os.path.join(home, f"lab{m.group(1)}", f)
             rel = f"lab{m.group(1)}/{f}"
             new, rec = file_hash(src), given.get(rel, {})
             if not os.path.exists(dest):
@@ -264,9 +269,9 @@ def student_env(home, cls, camera_device, pin=None, mqtt_port=None, lab=None):
     return env
 
 
-def start(cls, student, port, pin, camera, mqtt_port=None, lab=None):
+def start(cls, student, port, pin, camera, mqtt_port=None, lab=None, labs=None):
     home = os.path.join(ROOT, cls, student)
-    prepare(home)
+    prepare(home, labs)
     mqtt_port = mqtt_port or int(port) - 7000
     device = next((c["device"] for c in cameras() if c["number"] == camera), "") if camera is not None else ""
     # The teacher started one lab: JupyterLab shows only that lab's folder and opens its notebook. Without a lab it shows the whole folder (old way).
@@ -370,6 +375,12 @@ def fix_paths(home, old_home, new_home):
         pass
 
 
+def package_labs(w):
+    """The labs the teacher has in the package (a set of numbers), or None when the teacher app does not say (an older app: every lab)."""
+    labs = w.get("labs")
+    return {int(n) for n in labs if isinstance(n, int) and 0 <= n < MAX_LABS} if isinstance(labs, list) else None
+
+
 def reconcile(plan):
     wanted = {}
     for p in plan:
@@ -396,7 +407,7 @@ def reconcile(plan):
             continue
         if key not in running and not w.get("_wait"):
             try:
-                start(w["class"], w["student"], int(w["port"]), str(w["pin"]), w.get("camera"), w.get("mqtt_port"), w.get("lab"))
+                start(w["class"], w["student"], int(w["port"]), str(w["pin"]), w.get("camera"), w.get("mqtt_port"), w.get("lab"), package_labs(w))
             except OSError as error:
                 log("cannot start", key, error)
 
