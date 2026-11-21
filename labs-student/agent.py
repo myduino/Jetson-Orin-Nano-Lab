@@ -605,7 +605,7 @@ def launcher_page():
     else:                                                                    # several students on this Jetson: each one signs in with their own PIN
         links = "".join(f'<li><a href="http://localhost:{r["port"]}/">{html.escape(k.split("__", 1)[-1].replace("_", " ").title())}</a></li>' for k, r in live)
         text = f"<h1>Who are you?</h1><ul>{links}</ul><p>Type your PIN on the next page.</p>"
-    page = ("<!doctype html><meta charset=utf-8><title>Myduino Lab</title><style>body{font:18px sans-serif;max-width:30em;margin:15vh auto;padding:0 1em}"
+    page = ("<!doctype html><meta charset=utf-8><title>Myduino Jetson Lab</title><style>body{font:18px sans-serif;max-width:30em;margin:15vh auto;padding:0 1em}"
             "a{font-size:1.2em}</style>" + text).encode()
     return 200, {"Content-Type": "text/html; charset=utf-8"}, page
 
