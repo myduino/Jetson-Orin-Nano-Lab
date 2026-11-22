@@ -39,7 +39,6 @@ GRACE = 15 * 60                                                         # second
 LAUNCH_PORT = 8870                                                      # the desktop icon opens http://localhost:8870 (this Jetson only)
 EVERY = 5                                                               # seconds between two reports
 SOLO_KEY, SOLO_PORT = "solo__student", 8880                             # Solo Lab: the one student who works at this Jetson without a teacher app
-SOLO_WAIT = 30                                                          # seconds without the teacher app before the desktop icon starts a Solo Lab
 
 running = {}          # key -> {"proc", "port", "pin", "camera", "started"}
 preparing = {}        # key -> time when the student's Python environment is being made
@@ -48,7 +47,6 @@ deleted = []          # keys of folders deleted since the last report
 renamed = []          # "old>new" of class folders renamed since the last report
 rename_failed = {}    # "old>new" -> message, shown to the teacher until it works
 CFG = {}              # the settings of this Jetson (.agent.json)
-teacher_seen = [0.0]  # when the teacher app last answered
 solo_asked = [False]  # the student clicked the desktop icon and there is no teacher app: the Solo Lab runs
 solo_pin = [secrets.token_hex(8)]   # the token of the Solo Lab (new at each start of the agent; only this Jetson uses it)
 last_plan = []        # the last plan of the teacher app
@@ -410,8 +408,19 @@ def solo_entry():
 
 
 def solo_possible():
-    """The Solo Lab starts only when there is no teacher app: none is set, or it has not answered for a while."""
-    return solo_labs() is not None and (not CFG.get("teacher") or time.time() - teacher_seen[0] > SOLO_WAIT)
+    """The student at this Jetson can open the Solo Lab whenever the teacher app has no lab for this Jetson: there is no teacher app, it does not
+    answer, or it answers but has not put a student here. The lab of a class on this Jetson comes first."""
+    return solo_labs() is not None and not last_plan
+
+
+def solo_report():
+    """What the teacher app is told about the Solo Lab of this Jetson (None: it has none)."""
+    labs = solo_labs()
+    if labs is None:
+        return None
+    pack = next((p for p in packages() if p.get("id") == CFG["solo"].get("package")), {})
+    return {"package": str(pack.get("id", "")), "title": str(pack.get("title", "")), "labs": len(labs),
+            "running": SOLO_KEY in running and running[SOLO_KEY]["proc"].poll() is None, "preparing": SOLO_KEY in preparing}
 
 
 def plan_with_solo(plan):
@@ -670,7 +679,7 @@ def hello(cfg):
     body = {
         "id": cfg.get("id") or re.sub(r"[^a-z0-9_]", "_", socket.gethostname().lower()), "ip": MQTT_HOST[0], "cameras": cameras(),
         "running": [{"key": k, "port": r["port"], "alive": r["proc"].poll() is None} for k, r in running.items()],
-        "folders": [{"key": k, "mb": sizes.get(k, 0)} for k in folder_keys()], "progress": progress_last, "live": live_report(), "deleted": list(deleted), "renamed": list(renamed), "preparing": list(preparing), "ready": True, "course": course_version(), "stats": stats(), "desktop": desktop_on(),
+        "folders": [{"key": k, "mb": sizes.get(k, 0)} for k in folder_keys()], "progress": progress_last, "live": live_report(), "deleted": list(deleted), "renamed": list(renamed), "preparing": list(preparing), "ready": True, "solo": solo_report(), "course": course_version(), "stats": stats(), "desktop": desktop_on(),
         "note": next(iter(m for _, m in failed.values()), "") or ("MQTT is not installed on this Jetson. Click Update on the Jetsons page." if running and not mqtt_ready() else "") or next(iter(f"Could not rename a class folder: {m}" for m in rename_failed.values()), ""),
     }
     req = urllib.request.Request(f"http://{cfg['teacher']}/agent/hello", data=json.dumps(body).encode(),
@@ -756,7 +765,7 @@ def main():
                 continue
             try:
                 answer = hello(cfg)
-                last_ok = teacher_seen[0] = time.time()
+                last_ok = time.time()
                 for r in answer.get("rename", []):
                     rename_class(str(r.get("from", "")), str(r.get("to", "")))
                 for d in answer.get("delete", []):

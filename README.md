@@ -47,9 +47,9 @@ bash ~/Jetson-Orin-Nano-Lab/labs-setup.sh --solo vision jetson_01
 
 Packages: `foundations` (Labs 0 to 5), `vision` (0 to 16), `applied` (0 to 31), `full` (0 to 41); they are listed in `labs-student/packages.json`. `--solo off` turns it off. It can be combined with the teacher app: give the teacher address as well.
 
-The student double-clicks **Myduino Jetson Lab** on the Jetson desktop. If no teacher app answers (none is set, or it has not answered for 30 seconds), the Jetson makes the student's folder and Python environment (a few minutes the first time) and opens JupyterLab with the labs of the package. Work stays in `~/myduino-jetson-lab/solo/student` and is kept.
+The student double-clicks **Myduino Jetson Lab** on the Jetson desktop. When the teacher has no lab for this Jetson (no teacher app, or the app is on but has not put a student here), the Jetson makes the student's folder and Python environment (a few minutes the first time) and opens JupyterLab with the labs of the package. Work stays in `~/myduino-jetson-lab/solo/student` and is kept.
 
-It is one student per Jetson, at the Jetson itself (JupyterLab listens on this Jetson only). There are no classes, no Progress tab and no Start Lab. If the teacher app is on and starts a lab for this Jetson, the teacher app takes over and the Solo Lab closes.
+It is one student per Jetson, at the Jetson itself (JupyterLab listens on this Jetson only). There are no classes, no Progress tab and no Start Lab. A teacher can install the app later and add the Jetson: its card shows the Solo Lab (package and whether a student is working), and the Solo Lab goes on until the teacher starts a lab for a class on that Jetson. Then the teacher app takes over and the Solo Lab closes (the student's notebooks stay).
 
 ## What the lab leaves on a Jetson
 
