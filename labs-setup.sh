@@ -9,9 +9,23 @@
 # environment (JupyterLab, 2 to 3 minutes) in the student's folder and starts their JupyterLab.
 # The rest of the setup (CuPy, PyTorch, Ultralytics) is done by each student in the Lab 0 notebook, where they can watch it.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEACHER="$1"; NAME="$2"
-[ -n "$TEACHER" ] || read -r -p "Teacher page address (for example 192.168.0.10:8800): " TEACHER
-case "$TEACHER" in *:*) ;; *) TEACHER="$TEACHER:8800" ;; esac
+# Solo Lab (no teacher app): bash labs-setup.sh --solo <package> [name]   packages: foundations, vision, applied, full (labs-student/packages.json)
+# The desktop icon then gives the student at this Jetson their own lab when no teacher app answers. --solo off turns it off.
+SOLO=""; ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --solo) SOLO="${2:-}"; [ -n "$SOLO" ] || { echo "Say which package: --solo vision"; exit 1; }; shift 2 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+TEACHER="${ARGS[0]:-}"; NAME="${ARGS[1]:-}"
+# With --solo, a single word that is not an address is the name of this Jetson (not a teacher address).
+if [ -n "$SOLO" ] && [ ${#ARGS[@]} -eq 1 ] && ! [[ "${ARGS[0]}" =~ ^[0-9.]+(:[0-9]+)?$ || "${ARGS[0]}" == *:* ]]; then NAME="${ARGS[0]}"; TEACHER=""; fi
+if [ -n "$SOLO" ] && [ "$SOLO" != "off" ] && ! python3 -c "import json,sys;sys.exit(0 if any(p['id']==sys.argv[1] for p in json.load(open(sys.argv[2]))) else 1)" "$SOLO" "$HERE/labs-student/packages.json"; then
+  echo "Unknown package '$SOLO'. Use one of: $(python3 -c "import json,sys;print(', '.join(p['id'] for p in json.load(open(sys.argv[1]))))" "$HERE/labs-student/packages.json")"; exit 1
+fi
+[ -n "$TEACHER" ] || [ -n "$SOLO" ] || read -r -p "Teacher page address (for example 192.168.0.10:8800): " TEACHER
+[ -z "$TEACHER" ] || case "$TEACHER" in *:*) ;; *) TEACHER="$TEACHER:8800" ;; esac
 if [ -z "$NAME" ]; then NAME="$(hostname | tr 'A-Z-' 'a-z_')_$(cut -c1-4 /etc/machine-id 2>/dev/null)"; fi
 NAME="$(printf '%s' "$NAME" | tr 'A-Z-' 'a-z_' | sed 's/[^a-z0-9_]/_/g' | cut -c1-20)"
 
@@ -51,7 +65,24 @@ echo "== 4. Power mode =="
 command -v nvpmodel > /dev/null && echo no | sudo nvpmodel -m 2 && echo "Power mode: MAXN SUPER (full speed after the next reboot)"
 
 echo "== 5. The lab agent =="
-printf '{"teacher": "%s", "id": "%s"}\n' "$TEACHER" "$NAME" > ~/myduino-jetson-lab/.agent.json
+# The settings keep what is already there: running this again for the teacher app does not turn the Solo Lab off, and the other way round.
+python3 - "$TEACHER" "$NAME" "$SOLO" <<'PY'
+import json, os, sys
+path = os.path.expanduser("~/myduino-jetson-lab/.agent.json")
+teacher, name, solo = sys.argv[1:4]
+try:
+    cfg = json.load(open(path))
+except (OSError, ValueError):
+    cfg = {}
+cfg["id"] = name
+if teacher:
+    cfg["teacher"] = teacher
+if solo == "off":
+    cfg.pop("solo", None)
+elif solo:
+    cfg["solo"] = {"package": solo}
+json.dump(cfg, open(path, "w"))
+PY
 chmod 600 ~/myduino-jetson-lab/.agent.json
 sudo tee /etc/systemd/system/myduino-lab-agent.service > /dev/null <<UNIT
 [Unit]

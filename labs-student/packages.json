@@ -1,0 +1,6 @@
+[
+  {"id": "foundations", "title": "Foundations", "from": 0, "to": 5},
+  {"id": "vision", "title": "Vision AI", "from": 0, "to": 16},
+  {"id": "applied", "title": "Applied AI", "from": 0, "to": 31},
+  {"id": "full", "title": "Full Course", "from": 0, "to": 41}
+]

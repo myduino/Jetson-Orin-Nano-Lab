@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import secrets
 import signal
 import socket
 import subprocess
@@ -37,6 +38,8 @@ NAME = re.compile(r"^[a-z0-9_]{1,20}$")
 GRACE = 15 * 60                                                         # seconds without the teacher before every student session is closed
 LAUNCH_PORT = 8870                                                      # the desktop icon opens http://localhost:8870 (this Jetson only)
 EVERY = 5                                                               # seconds between two reports
+SOLO_KEY, SOLO_PORT = "solo__student", 8880                             # Solo Lab: the one student who works at this Jetson without a teacher app
+SOLO_WAIT = 30                                                          # seconds without the teacher app before the desktop icon starts a Solo Lab
 
 running = {}          # key -> {"proc", "port", "pin", "camera", "started"}
 preparing = {}        # key -> time when the student's Python environment is being made
@@ -44,6 +47,11 @@ failed = {}           # key -> (time, message) of the last failed attempt to mak
 deleted = []          # keys of folders deleted since the last report
 renamed = []          # "old>new" of class folders renamed since the last report
 rename_failed = {}    # "old>new" -> message, shown to the teacher until it works
+CFG = {}              # the settings of this Jetson (.agent.json)
+teacher_seen = [0.0]  # when the teacher app last answered
+solo_asked = [False]  # the student clicked the desktop icon and there is no teacher app: the Solo Lab runs
+solo_pin = [secrets.token_hex(8)]   # the token of the Solo Lab (new at each start of the agent; only this Jetson uses it)
+last_plan = []        # the last plan of the teacher app
 
 
 def log(*a):
@@ -269,7 +277,7 @@ def student_env(home, cls, camera_device, pin=None, mqtt_port=None, lab=None):
     return env
 
 
-def start(cls, student, port, pin, camera, mqtt_port=None, lab=None, labs=None):
+def start(cls, student, port, pin, camera, mqtt_port=None, lab=None, labs=None, local=False):
     home = os.path.join(ROOT, cls, student)
     prepare(home, labs)
     mqtt_port = mqtt_port or int(port) - 7000
@@ -283,7 +291,7 @@ def start(cls, student, port, pin, camera, mqtt_port=None, lab=None, labs=None):
     log("start", f"{cls}/{student}", "port", port, "lab", lab if lab is not None else "-", "camera", camera if camera is not None else "-")
     out = open(os.path.join(home, ".jupyter", "server.log"), "ab")
     proc = subprocess.Popen(
-        [os.path.join(venv_of(home), "bin", "jupyter"), "lab", "--no-browser", "--ip=0.0.0.0", f"--port={port}", "--ServerApp.port_retries=0",
+        [os.path.join(venv_of(home), "bin", "jupyter"), "lab", "--no-browser", "--ip=127.0.0.1" if local else "--ip=0.0.0.0", f"--port={port}", "--ServerApp.port_retries=0",
          f"--ServerApp.token={pin}", "--ServerApp.allow_remote_access=True", f"--ServerApp.root_dir={root}"] + ([first] if first else []),
         cwd=root, env=student_env(home, cls, device, pin, mqtt_port, lab), stdout=out, stderr=out, start_new_session=True)
     running[f"{cls}__{student}"] = {"proc": proc, "port": port, "pin": pin, "camera": camera, "lab": lab, "started": time.time(),
@@ -375,6 +383,45 @@ def fix_paths(home, old_home, new_home):
         pass
 
 
+def packages():
+    try:
+        return json.load(open(os.path.join(HERE, "labs-student", "packages.json")))
+    except (OSError, ValueError):
+        return []
+
+
+def solo_labs():
+    """The labs of the Solo Lab (a set of numbers), or None when this Jetson has no Solo Lab. It is set with labs-setup.sh --solo <package>."""
+    solo = CFG.get("solo")
+    if not isinstance(solo, dict):
+        return None
+    if isinstance(solo.get("labs"), list):
+        return {int(n) for n in solo["labs"] if isinstance(n, int) and 0 <= n < MAX_LABS}
+    pack = next((p for p in packages() if p.get("id") == solo.get("package")), None)
+    return set(range(int(pack["from"]), int(pack["to"]) + 1)) if pack else None
+
+
+def solo_entry():
+    """The plan entry of the Solo Lab: one student, the whole folder of the package, JupyterLab on this Jetson only."""
+    labs = solo_labs()
+    camera = running[SOLO_KEY]["camera"] if SOLO_KEY in running else (0 if cameras() else None)     # the camera stays as it was while the lab runs
+    return {"class": "solo", "student": "student", "port": SOLO_PORT, "pin": solo_pin[0], "camera": camera, "mqtt_port": SOLO_PORT - 7000,
+            "lab": None, "labs": sorted(labs) if labs is not None else None, "local": True}
+
+
+def solo_possible():
+    """The Solo Lab starts only when there is no teacher app: none is set, or it has not answered for a while."""
+    return solo_labs() is not None and (not CFG.get("teacher") or time.time() - teacher_seen[0] > SOLO_WAIT)
+
+
+def plan_with_solo(plan):
+    """The plan of the teacher app wins. With nothing for this Jetson in it, the Solo Lab goes on once the student asked for it."""
+    if plan or solo_labs() is None:
+        solo_asked[0] = False if plan else solo_asked[0]
+        return plan
+    return plan + [solo_entry()] if solo_asked[0] else plan
+
+
 def package_labs(w):
     """The labs the teacher has in the package (a set of numbers), or None when the teacher app does not say (an older app: every lab)."""
     labs = w.get("labs")
@@ -407,7 +454,7 @@ def reconcile(plan):
             continue
         if key not in running and not w.get("_wait"):
             try:
-                start(w["class"], w["student"], int(w["port"]), str(w["pin"]), w.get("camera"), w.get("mqtt_port"), w.get("lab"), package_labs(w))
+                start(w["class"], w["student"], int(w["port"]), str(w["pin"]), w.get("camera"), w.get("mqtt_port"), w.get("lab"), package_labs(w), bool(w.get("local")))
             except OSError as error:
                 log("cannot start", key, error)
 
@@ -460,7 +507,7 @@ def folder_keys():
     out = []
     try:
         for c in sorted(os.listdir(ROOT)):
-            if NAME.match(c) and os.path.isdir(os.path.join(ROOT, c)):
+            if NAME.match(c) and c != "solo" and os.path.isdir(os.path.join(ROOT, c)):     # the Solo Lab is not a class of the teacher
                 out += [f"{c}__{n}" for n in sorted(os.listdir(os.path.join(ROOT, c))) if NAME.match(n) and os.path.isdir(os.path.join(ROOT, c, n))]
     except OSError:
         pass
@@ -537,7 +584,7 @@ def live_report():
 def progress_report():
     out = {}
     try:
-        classes = [c for c in os.listdir(ROOT) if NAME.match(c) and os.path.isdir(os.path.join(ROOT, c))]
+        classes = [c for c in os.listdir(ROOT) if NAME.match(c) and c != "solo" and os.path.isdir(os.path.join(ROOT, c))]
     except OSError:
         return out
     for cls in classes:
@@ -642,7 +689,14 @@ def launcher_page():
     if len(live) == 1:
         r = live[0][1]
         return 302, {"Location": f"http://localhost:{r['port']}/lab?token={r['pin']}"}, b""
-    if not live:
+    if not live and solo_possible():                                         # no teacher app: this Jetson gives its own lab to the student at its screen
+        solo_asked[0] = True
+        if SOLO_KEY in failed:
+            text = f"<h1>Your lab could not start</h1><p>{html.escape(failed[SOLO_KEY][1])}</p><p>It tries again by itself. Reload this page in a minute.</p>"
+        else:
+            text = ("<meta http-equiv=refresh content=5><h1>Getting your lab ready...</h1>"
+                    "<p>The first time it takes a few minutes. This page opens your lab by itself.</p>")
+    elif not live:
         text = "<h1>No lab yet</h1><p>Your teacher has not started a lab for you. Try again in a minute.</p>"
     else:                                                                    # several students on this Jetson: each one signs in with their own PIN
         links = "".join(f'<li><a href="http://localhost:{r["port"]}/">{html.escape(k.split("__", 1)[-1].replace("_", " ").title())}</a></li>' for k, r in live)
@@ -686,32 +740,41 @@ def main():
     try:
         cfg = json.load(open(CONFIG))
     except (OSError, ValueError):
-        sys.exit(f"No settings in {CONFIG}. Run labs-setup.sh <teacher address>.")
+        sys.exit(f"No settings in {CONFIG}. Run labs-setup.sh <teacher address> or labs-setup.sh --solo <package>.")
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
-    log("agent started; teacher", cfg["teacher"])
+    CFG.update(cfg)
+    log("agent started; teacher", cfg.get("teacher") or "none", "| Solo Lab", "on" if solo_labs() is not None else "off")
     start_launcher()
     threading.Thread(target=measure_sizes, daemon=True).start()
     shown = ""
     last_ok = time.time()
     try:
         while True:
+            if not cfg.get("teacher"):                                       # no teacher app at all: only the Solo Lab
+                reconcile(plan_with_solo([]))
+                time.sleep(EVERY)
+                continue
             try:
                 answer = hello(cfg)
-                last_ok = time.time()
+                last_ok = teacher_seen[0] = time.time()
                 for r in answer.get("rename", []):
                     rename_class(str(r.get("from", "")), str(r.get("to", "")))
                 for d in answer.get("delete", []):
                     delete_folder(str(d.get("class", "")), str(d.get("student", "")))
-                reconcile(answer.get("plan", []))
+                last_plan[:] = answer.get("plan", [])
+                reconcile(plan_with_solo(last_plan))
                 shown = ""
             except (urllib.error.URLError, OSError, ValueError) as error:
                 if str(error) != shown:                                      # say it once, not every 5 seconds
                     log("cannot reach the teacher server:", error)
                     shown = str(error)
-                if running and time.time() - last_ok > GRACE:                # the teacher PC is gone: close the lab
+                if any(k != SOLO_KEY for k in running) and time.time() - last_ok > GRACE:      # the teacher PC is gone: close the labs of the class
                     log("no news from the teacher for", GRACE // 60, "minutes: stopping all student sessions")
-                    for key in list(running):
+                    for key in [k for k in running if k != SOLO_KEY]:
                         stop(key)
+                    del last_plan[:]
+                if solo_labs() is not None and not last_plan:
+                    reconcile(plan_with_solo([]))                            # the Solo Lab goes on (or starts) without the teacher app
             time.sleep(EVERY)
     finally:
         for key in list(running):
