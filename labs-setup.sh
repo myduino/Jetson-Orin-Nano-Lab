@@ -89,7 +89,7 @@ command -v nvpmodel > /dev/null && echo no | sudo nvpmodel -m 2 && echo "Power m
 echo "== 5. The lab agent =="
 # The settings keep what is already there: running this again for the teacher app does not turn the Solo Lab off, and the other way round.
 python3 - "$TEACHER" "$NAME" "$SOLO" <<'PY'
-import json, os, re, secrets, sys
+import json, os, re, sys
 path = os.path.expanduser("~/myduino-jetson-lab/.agent.json")
 teacher, name, solo = sys.argv[1:4]
 try:
@@ -105,7 +105,7 @@ elif solo:
     old = cfg.get("solo") if isinstance(cfg.get("solo"), dict) else {}
     cfg["solo"] = {**old, "package": solo}                  # the PIN of the Solo Lab stays when the package changes
     if not re.fullmatch(r"\d{6}", str(cfg["solo"].get("pin", ""))):
-        cfg["solo"]["pin"] = str(secrets.randbelow(900000) + 100000)
+        cfg["solo"]["pin"] = "888888"                            # the PIN of every Solo Lab at first; put another 6 digits in the settings to change it
 json.dump(cfg, open(path, "w"))
 PY
 chmod 600 ~/myduino-jetson-lab/.agent.json

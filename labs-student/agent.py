@@ -17,7 +17,6 @@ import json
 import os
 import re
 import shutil
-import secrets
 import signal
 import socket
 import subprocess
@@ -38,6 +37,7 @@ NAME = re.compile(r"^[a-z0-9_]{1,20}$")
 GRACE = 15 * 60                                                         # seconds without the teacher before every student session is closed
 LAUNCH_PORT = 8870                                                      # the desktop icon opens http://localhost:8870 (this Jetson only)
 EVERY = 5                                                               # seconds between two reports
+SOLO_PIN = "888888"                                                     # the PIN of a Solo Lab when the settings have none (the school can put another one of 6 digits in the settings)
 SOLO_KEY, SOLO_PORT = "solo__student", 8880                             # Solo Lab: the one student who works at this Jetson without a teacher app
 
 running = {}          # key -> {"proc", "port", "pin", "camera", "started"}
@@ -398,11 +398,11 @@ def solo_labs():
 
 
 def ensure_solo_pin():
-    """The Solo Lab has a PIN of 6 digits that stays the same (it is saved in the settings): the student opens the lab from a laptop with the address and this PIN."""
+    """The Solo Lab has a PIN of 6 digits that stays the same (it is saved in the settings, 888888 at first): the student opens the lab from a laptop with the address and this PIN."""
     solo = CFG.get("solo")
     if not isinstance(solo, dict) or re.fullmatch(r"\d{6}", str(solo.get("pin", ""))):
         return
-    solo["pin"] = str(secrets.randbelow(900000) + 100000)
+    solo["pin"] = SOLO_PIN
     try:
         cfg = json.load(open(CONFIG))
     except (OSError, ValueError):
