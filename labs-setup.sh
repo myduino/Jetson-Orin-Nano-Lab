@@ -162,7 +162,7 @@ fi
 echo
 if [ -n "$SOLO_ON" ]; then
   echo "Solo Lab is on (package: $SOLO_ON). The student double-clicks Myduino Jetson Lab on the desktop of this Jetson:"
-  echo "when no teacher app answers, the Jetson makes their folder and opens JupyterLab (a few minutes the first time)."
+  echo "when the teacher has no lab for this Jetson, it makes their folder and opens JupyterLab (a few minutes the first time)."
 fi
 if [ -n "$TEACHER" ]; then
   echo "Next: the teacher puts a student on this Jetson, and the student opens the address from the teacher page."
