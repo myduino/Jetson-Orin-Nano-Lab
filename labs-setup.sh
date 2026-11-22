@@ -45,7 +45,28 @@ sed -i '/^alias lab=/d;/^alias jet=/d' ~/.bashrc 2>/dev/null
 rm -f ~/.lab_agent.json
 mkdir -p ~/myduino-jetson-lab
 
+# The language model engine is only for Labs 20 to 27. A Jetson with a small package (Foundations or Vision AI) and no teacher app does not
+# need it, which saves about 20 minutes. With a teacher app, or with Applied AI or Full Course, it is built (run this again to build it later).
+NEED_LLM="$(python3 - "$TEACHER" "$SOLO" "$HERE/labs-student/packages.json" <<'PY'
+import json, os, sys
+teacher, solo, packages = sys.argv[1:4]
+try:
+    old = json.load(open(os.path.expanduser("~/myduino-jetson-lab/.agent.json")))
+except (OSError, ValueError):
+    old = {}
+teacher = teacher or old.get("teacher", "")
+pack = old.get("solo", {}).get("package", "") if not solo else ("" if solo == "off" else solo)
+try:
+    top = next((p["to"] for p in json.load(open(packages)) if p["id"] == pack), None)
+except (OSError, ValueError):
+    top = None
+print("0" if (not teacher and top is not None and top < 20) else "1")
+PY
+)"
 echo "== 3. Language model engine (llama.cpp, used by Labs 20 to 27) =="
+if [ "$NEED_LLM" = "0" ]; then
+  echo "Skipped: the package of this Jetson has no language model lab. Run this again with a bigger package to build it."
+else
 # Built once with CUDA for the GPU of the Orin Nano. It takes about 20 minutes. The version is fixed (v0.9.0, the one the labs were tested with):
 # it has the speech endpoint /tts that Labs 22 and 23 use. GGML_CUDA_NO_VMM stops a GPU memory error of the audio models on this board.
 # The model files are downloaded later by the first student, in Lab 20. Skipped when this version is already built.
@@ -59,6 +80,7 @@ else
   (cd ~/llama.cpp && cmake -B build -DGGML_CUDA=ON -DGGML_CUDA_NO_VMM=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=87 -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build --config Release -j4 --target llama-server \
     && echo "$LLAMA_COMMIT" > .myduino_build) || echo "llama.cpp did not build: run this script again, or ask the teacher."
+fi
 fi
 
 echo "== 4. Power mode =="
