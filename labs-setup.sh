@@ -125,13 +125,24 @@ sudo systemctl daemon-reload
 sudo systemctl enable myduino-lab-agent > /dev/null 2>&1
 sudo systemctl restart myduino-lab-agent
 sleep 3
-if curl -s -m 5 "http://$TEACHER/" > /dev/null; then
-  echo "The teacher page at $TEACHER answers. Refresh the teacher page: this Jetson should be in the list."
-else
-  echo "Cannot reach the teacher page at $TEACHER. Check that the teacher PC is on, on the same network,"
-  echo "and that Windows Firewall allows port 8800. The agent keeps trying by itself."
+# What the settings say now (running this again keeps the teacher address or the Solo Lab that were set before).
+TEACHER="$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/myduino-jetson-lab/.agent.json'))).get('teacher',''))")"
+SOLO_ON="$(python3 -c "import json,os;print((json.load(open(os.path.expanduser('~/myduino-jetson-lab/.agent.json'))).get('solo') or {}).get('package',''))")"
+if [ -n "$TEACHER" ]; then
+  if curl -s -m 5 "http://$TEACHER/" > /dev/null; then
+    echo "The teacher page at $TEACHER answers. Refresh the teacher page: this Jetson should be in the list."
+  else
+    echo "Cannot reach the teacher page at $TEACHER. Check that the teacher PC is on, on the same network,"
+    echo "and that Windows Firewall allows port 8800. The agent keeps trying by itself."
+  fi
 fi
 
 echo
-echo "Setup finished. Next: the teacher puts a student on this Jetson, and the student opens the address from the teacher page."
+if [ -n "$SOLO_ON" ]; then
+  echo "Solo Lab is on (package: $SOLO_ON). The student double-clicks Myduino Jetson Lab on the desktop of this Jetson:"
+  echo "when no teacher app answers, the Jetson makes their folder and opens JupyterLab (a few minutes the first time)."
+fi
+if [ -n "$TEACHER" ]; then
+  echo "Next: the teacher puts a student on this Jetson, and the student opens the address from the teacher page."
+fi
 echo "Each student then runs Lab 0: Part 0 (system programs, once for this Jetson) and Part 0b (their own AI packages and models)."
