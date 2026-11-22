@@ -38,6 +38,10 @@ GRACE = 15 * 60                                                         # second
 LAUNCH_PORT = 8870                                                      # the desktop icon opens http://localhost:8870 (this Jetson only)
 EVERY = 5                                                               # seconds between two reports
 SOLO_PIN = "888888"                                                     # the PIN of a Solo Lab when the settings have none (the school can put another one of 6 digits in the settings)
+GITHUB_COMMIT = "https://api.github.com/repos/myduino/Jetson-Orin-Nano-Lab/commits/main"
+AUTO_FIRST, AUTO_EVERY, AUTO_BUSY = 10 * 60, 6 * 3600, 5 * 60           # automatic update of a Solo Lab: first look 10 minutes after the start, then every 6 hours; 5 minutes later when a student is busy
+AUTO_TEACHER_SILENT = 24 * 3600                                         # a teacher app that did not answer for a day no longer updates this Jetson: it updates itself
+AGENT_STARTED = time.time()
 SOLO_KEY, SOLO_PORT = "solo__student", 8880                             # Solo Lab: the one student who works at this Jetson without a teacher app
 
 running = {}          # key -> {"proc", "port", "pin", "camera", "started"}
@@ -48,6 +52,8 @@ renamed = []          # "old>new" of class folders renamed since the last report
 rename_failed = {}    # "old>new" -> message, shown to the teacher until it works
 CFG = {}              # the settings of this Jetson (.agent.json)
 last_plan = []        # the last plan of the teacher app
+teacher_ok_at = [0.0] # when the teacher app last answered
+update_at = [AGENT_STARTED + AUTO_FIRST]   # when to look for a new version of the course next
 
 
 def log(*a):
@@ -454,7 +460,85 @@ def solo_report():
     pack = next((p for p in packages() if p.get("id") == CFG["solo"].get("package")), {})
     up = SOLO_KEY in running and running[SOLO_KEY]["proc"].poll() is None
     return {"package": str(pack.get("id", "")), "title": str(pack.get("title", "")), "labs": len(labs), "running": up, "active": up and solo_active(),
-            "preparing": SOLO_KEY in preparing, "port": SOLO_PORT, "pin": str(CFG["solo"].get("pin", ""))}
+            "preparing": SOLO_KEY in preparing, "port": SOLO_PORT, "pin": str(CFG["solo"].get("pin", "")), **last_update()}
+
+
+# ---------------------------------------------------------------- the automatic update of a Solo Lab
+def autoupdate_enabled():
+    """A Jetson with a Solo Lab updates itself when no teacher app looks after it (none is set, or it did not answer for a day).
+    "autoupdate": false in the "solo" settings turns it off."""
+    solo = CFG.get("solo")
+    if not isinstance(solo, dict) or solo.get("autoupdate") is False or solo_labs() is None:
+        return False
+    return not CFG.get("teacher") or time.time() - max(teacher_ok_at[0], AGENT_STARTED) >= AUTO_TEACHER_SILENT
+
+
+def latest_sha():
+    """The newest commit of the course on GitHub ("" when there is no internet)."""
+    try:
+        req = urllib.request.Request(GITHUB_COMMIT, headers={"Accept": "application/vnd.github.sha", "User-Agent": "myduino-lab-agent"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            sha = resp.read().decode().strip()
+        return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def update_course():
+    """Brings the course folder to the newest version (what the teacher app does with Update All, without the system part). (ok, message)"""
+    if not shutil.which("git"):
+        return False, "git is not installed"
+    try:
+        for args in (("fetch", "-q", "--depth", "1", "origin", "main"), ("reset", "--hard", "-q", "FETCH_HEAD")):
+            r = subprocess.run(["git", "-C", HERE, *args], capture_output=True, text=True, timeout=180)
+            if r.returncode != 0:
+                return False, (r.stderr or r.stdout).strip()[-200:]
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, str(error)
+    return True, ""
+
+
+def autoupdate_tick(now=None):
+    """Looks for a new version now and then. It updates only when nobody works: no class lab, no student in the Solo Lab in the last 5 minutes.
+    Returns True when the course folder was updated: the agent must restart (the service starts it again with the new files)."""
+    now = time.time() if now is None else now
+    if now < update_at[0]:
+        return False
+    if not autoupdate_enabled():
+        update_at[0] = now + AUTO_EVERY
+        return False
+    sha = latest_sha()
+    if not sha:
+        update_at[0] = now + 3600                                            # no internet: try again in an hour
+        return False
+    if sha == course_version():
+        update_at[0] = now + AUTO_EVERY
+        return False
+    if last_plan or preparing or solo_active():                              # an update is there, but somebody works: later
+        update_at[0] = now + AUTO_BUSY
+        return False
+    old, setup_before = course_version(), file_hash(os.path.join(HERE, "labs-setup.sh")) if os.path.exists(os.path.join(HERE, "labs-setup.sh")) else ""
+    ok, message = update_course()
+    if not ok:
+        log("automatic update failed:", message)
+        update_at[0] = now + 3600
+        return False
+    setup_after = file_hash(os.path.join(HERE, "labs-setup.sh")) if os.path.exists(os.path.join(HERE, "labs-setup.sh")) else ""
+    try:
+        with open(os.path.join(ROOT, ".last_update.json"), "w") as f:
+            json.dump({"at": int(now), "from": old[:7], "to": sha[:7], "needs_setup": setup_before != setup_after}, f)
+    except OSError:
+        pass
+    log("automatic update:", old[:7], "->", sha[:7], "| the agent restarts with the new files" + (" | labs-setup.sh changed: run it again for the system part" if setup_before != setup_after else ""))
+    return True
+
+
+def last_update():
+    try:
+        d = json.load(open(os.path.join(ROOT, ".last_update.json")))
+        return {"updated": int(d.get("at", 0)), "needs_setup": bool(d.get("needs_setup"))}
+    except (OSError, ValueError):
+        return {}
 
 
 def plan_with_solo(plan):
@@ -807,11 +891,13 @@ def main():
         while True:
             if not cfg.get("teacher"):                                       # no teacher app at all: only the Solo Lab
                 reconcile(plan_with_solo([]))
+                if autoupdate_tick():
+                    sys.exit(0)                                              # the service starts the agent again with the new files
                 time.sleep(EVERY)
                 continue
             try:
                 answer = hello(cfg)
-                last_ok = time.time()
+                last_ok = teacher_ok_at[0] = time.time()
                 for r in answer.get("rename", []):
                     rename_class(str(r.get("from", "")), str(r.get("to", "")))
                 for d in answer.get("delete", []):
@@ -819,6 +905,8 @@ def main():
                 last_plan[:] = answer.get("plan", [])
                 reconcile(plan_with_solo(last_plan))
                 shown = ""
+                if autoupdate_tick():
+                    sys.exit(0)
             except (urllib.error.URLError, OSError, ValueError) as error:
                 if str(error) != shown:                                      # say it once, not every 5 seconds
                     log("cannot reach the teacher server:", error)
@@ -830,6 +918,8 @@ def main():
                     del last_plan[:]
                 if solo_labs() is not None and not last_plan:
                     reconcile(plan_with_solo([]))                            # the Solo Lab goes on (or starts) without the teacher app
+                if autoupdate_tick():                                        # a teacher app that is silent for a day does not look after this Jetson any more
+                    sys.exit(0)
             time.sleep(EVERY)
     finally:
         for key in list(running):
