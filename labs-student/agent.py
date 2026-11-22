@@ -47,8 +47,6 @@ deleted = []          # keys of folders deleted since the last report
 renamed = []          # "old>new" of class folders renamed since the last report
 rename_failed = {}    # "old>new" -> message, shown to the teacher until it works
 CFG = {}              # the settings of this Jetson (.agent.json)
-solo_asked = [False]  # the student clicked the desktop icon and there is no teacher app: the Solo Lab runs
-solo_pin = [secrets.token_hex(8)]   # the token of the Solo Lab (new at each start of the agent; only this Jetson uses it)
 last_plan = []        # the last plan of the teacher app
 
 
@@ -275,7 +273,7 @@ def student_env(home, cls, camera_device, pin=None, mqtt_port=None, lab=None):
     return env
 
 
-def start(cls, student, port, pin, camera, mqtt_port=None, lab=None, labs=None, local=False):
+def start(cls, student, port, pin, camera, mqtt_port=None, lab=None, labs=None):
     home = os.path.join(ROOT, cls, student)
     prepare(home, labs)
     mqtt_port = mqtt_port or int(port) - 7000
@@ -289,7 +287,7 @@ def start(cls, student, port, pin, camera, mqtt_port=None, lab=None, labs=None, 
     log("start", f"{cls}/{student}", "port", port, "lab", lab if lab is not None else "-", "camera", camera if camera is not None else "-")
     out = open(os.path.join(home, ".jupyter", "server.log"), "ab")
     proc = subprocess.Popen(
-        [os.path.join(venv_of(home), "bin", "jupyter"), "lab", "--no-browser", "--ip=127.0.0.1" if local else "--ip=0.0.0.0", f"--port={port}", "--ServerApp.port_retries=0",
+        [os.path.join(venv_of(home), "bin", "jupyter"), "lab", "--no-browser", "--ip=0.0.0.0", f"--port={port}", "--ServerApp.port_retries=0",
          f"--ServerApp.token={pin}", "--ServerApp.allow_remote_access=True", f"--ServerApp.root_dir={root}"] + ([first] if first else []),
         cwd=root, env=student_env(home, cls, device, pin, mqtt_port, lab), stdout=out, stderr=out, start_new_session=True)
     running[f"{cls}__{student}"] = {"proc": proc, "port": port, "pin": pin, "camera": camera, "lab": lab, "started": time.time(),
@@ -399,18 +397,53 @@ def solo_labs():
     return set(range(int(pack["from"]), int(pack["to"]) + 1)) if pack else None
 
 
+def ensure_solo_pin():
+    """The Solo Lab has a PIN of 6 digits that stays the same (it is saved in the settings): the student opens the lab from a laptop with the address and this PIN."""
+    solo = CFG.get("solo")
+    if not isinstance(solo, dict) or re.fullmatch(r"\d{6}", str(solo.get("pin", ""))):
+        return
+    solo["pin"] = str(secrets.randbelow(900000) + 100000)
+    try:
+        cfg = json.load(open(CONFIG))
+    except (OSError, ValueError):
+        cfg = dict(CFG)
+    if isinstance(cfg.get("solo"), dict):
+        cfg["solo"]["pin"] = solo["pin"]
+    else:
+        cfg["solo"] = dict(solo)
+    tmp = CONFIG + ".tmp"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(cfg, f)
+    os.replace(tmp, CONFIG)
+
+
 def solo_entry():
-    """The plan entry of the Solo Lab: one student, the whole folder of the package, JupyterLab on this Jetson only."""
+    """The plan entry of the Solo Lab: one student, the whole folder of the package, JupyterLab on port 8880 with the PIN of the Solo Lab."""
     labs = solo_labs()
     camera = running[SOLO_KEY]["camera"] if SOLO_KEY in running else (0 if cameras() else None)     # the camera stays as it was while the lab runs
-    return {"class": "solo", "student": "student", "port": SOLO_PORT, "pin": solo_pin[0], "camera": camera, "mqtt_port": SOLO_PORT - 7000,
-            "lab": None, "labs": sorted(labs) if labs is not None else None, "local": True}
+    return {"class": "solo", "student": "student", "port": SOLO_PORT, "pin": str(CFG["solo"].get("pin", "")), "camera": camera, "mqtt_port": SOLO_PORT - 7000,
+            "lab": None, "labs": sorted(labs) if labs is not None else None}
 
 
 def solo_possible():
-    """The student at this Jetson can open the Solo Lab whenever the teacher app has no lab for this Jetson: there is no teacher app, it does not
-    answer, or it answers but has not put a student here. The lab of a class on this Jetson comes first."""
+    """The Solo Lab runs whenever the teacher app has no lab for this Jetson: there is no teacher app, it does not answer, or it answers but has not
+    put a student here. The lab of a class on this Jetson comes first (the Solo Lab closes, and starts again when the class lab ends)."""
     return solo_labs() is not None and not last_plan
+
+
+def solo_active():
+    """True when a student used the Solo Lab in the last 5 minutes (a kernel is open and JupyterLab saw activity)."""
+    r = running.get(SOLO_KEY)
+    if not r or r["proc"].poll() is not None:
+        return False
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{SOLO_PORT}/api/status", headers={"Authorization": f"token {r['pin']}"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            st = json.load(resp)
+        seen = time.mktime(time.strptime(st["last_activity"][:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone      # the time is in UTC
+        return int(st.get("kernels", 0)) > 0 and time.time() - seen < 300
+    except (OSError, ValueError, KeyError):
+        return False
 
 
 def solo_report():
@@ -419,16 +452,16 @@ def solo_report():
     if labs is None:
         return None
     pack = next((p for p in packages() if p.get("id") == CFG["solo"].get("package")), {})
-    return {"package": str(pack.get("id", "")), "title": str(pack.get("title", "")), "labs": len(labs),
-            "running": SOLO_KEY in running and running[SOLO_KEY]["proc"].poll() is None, "preparing": SOLO_KEY in preparing}
+    up = SOLO_KEY in running and running[SOLO_KEY]["proc"].poll() is None
+    return {"package": str(pack.get("id", "")), "title": str(pack.get("title", "")), "labs": len(labs), "running": up, "active": up and solo_active(),
+            "preparing": SOLO_KEY in preparing, "port": SOLO_PORT, "pin": str(CFG["solo"].get("pin", ""))}
 
 
 def plan_with_solo(plan):
-    """The plan of the teacher app wins. With nothing for this Jetson in it, the Solo Lab goes on once the student asked for it."""
+    """The plan of the teacher app wins. With nothing for this Jetson in it, the Solo Lab is in the plan (it is always ready for a student)."""
     if plan or solo_labs() is None:
-        solo_asked[0] = False if plan else solo_asked[0]
         return plan
-    return plan + [solo_entry()] if solo_asked[0] else plan
+    return plan + [solo_entry()]
 
 
 def package_labs(w):
@@ -463,7 +496,7 @@ def reconcile(plan):
             continue
         if key not in running and not w.get("_wait"):
             try:
-                start(w["class"], w["student"], int(w["port"]), str(w["pin"]), w.get("camera"), w.get("mqtt_port"), w.get("lab"), package_labs(w), bool(w.get("local")))
+                start(w["class"], w["student"], int(w["port"]), str(w["pin"]), w.get("camera"), w.get("mqtt_port"), w.get("lab"), package_labs(w))
             except OSError as error:
                 log("cannot start", key, error)
 
@@ -698,8 +731,7 @@ def launcher_page():
     if len(live) == 1:
         r = live[0][1]
         return 302, {"Location": f"http://localhost:{r['port']}/lab?token={r['pin']}"}, b""
-    if not live and solo_possible():                                         # no teacher app: this Jetson gives its own lab to the student at its screen
-        solo_asked[0] = True
+    if not live and solo_possible():                                         # this Jetson gives its own lab to the student at its screen (it starts by itself)
         if SOLO_KEY in failed:
             text = f"<h1>Your lab could not start</h1><p>{html.escape(failed[SOLO_KEY][1])}</p><p>It tries again by itself. Reload this page in a minute.</p>"
         else:
@@ -715,9 +747,22 @@ def launcher_page():
     return 200, {"Content-Type": "text/html; charset=utf-8"}, page
 
 
+def info_page():
+    """The address and the PIN to open the Solo Lab from a laptop on the same network."""
+    if solo_labs() is None:
+        text = "<h1>No Solo Lab</h1><p>This Jetson has no Solo Lab. Your teacher starts your lab.</p>"
+    else:
+        ip = my_ip(str(CFG.get("teacher", "")).partition(":")[0] or "10.255.255.255")
+        text = (f"<h1>Open your lab from a laptop</h1><p>On the same network, open this address in a browser:</p><p><b>http://{ip}:{SOLO_PORT}</b></p>"
+                f"<p>PIN: <b>{html.escape(str(CFG['solo'].get('pin', '')))}</b></p>")
+    page = ("<!doctype html><meta charset=utf-8><title>Myduino Jetson Lab</title><style>body{font:18px sans-serif;max-width:30em;margin:15vh auto;padding:0 1em}"
+            "b{font-size:1.3em}</style>" + text).encode()
+    return 200, {"Content-Type": "text/html; charset=utf-8"}, page
+
+
 class Launcher(http.server.BaseHTTPRequestHandler):
     def answer(self, with_body):
-        code, headers, body = launcher_page()
+        code, headers, body = info_page() if self.path.startswith("/info") else launcher_page()
         self.send_response(code)
         for k, v in headers.items():
             self.send_header(k, v)
@@ -752,6 +797,7 @@ def main():
         sys.exit(f"No settings in {CONFIG}. Run labs-setup.sh <teacher address> or labs-setup.sh --solo <package>.")
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
     CFG.update(cfg)
+    ensure_solo_pin()
     log("agent started; teacher", cfg.get("teacher") or "none", "| Solo Lab", "on" if solo_labs() is not None else "off")
     start_launcher()
     threading.Thread(target=measure_sizes, daemon=True).start()

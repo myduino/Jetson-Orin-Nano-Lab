@@ -89,7 +89,7 @@ command -v nvpmodel > /dev/null && echo no | sudo nvpmodel -m 2 && echo "Power m
 echo "== 5. The lab agent =="
 # The settings keep what is already there: running this again for the teacher app does not turn the Solo Lab off, and the other way round.
 python3 - "$TEACHER" "$NAME" "$SOLO" <<'PY'
-import json, os, sys
+import json, os, re, secrets, sys
 path = os.path.expanduser("~/myduino-jetson-lab/.agent.json")
 teacher, name, solo = sys.argv[1:4]
 try:
@@ -102,7 +102,10 @@ if teacher:
 if solo == "off":
     cfg.pop("solo", None)
 elif solo:
-    cfg["solo"] = {"package": solo}
+    old = cfg.get("solo") if isinstance(cfg.get("solo"), dict) else {}
+    cfg["solo"] = {**old, "package": solo}                  # the PIN of the Solo Lab stays when the package changes
+    if not re.fullmatch(r"\d{6}", str(cfg["solo"].get("pin", ""))):
+        cfg["solo"]["pin"] = str(secrets.randbelow(900000) + 100000)
 json.dump(cfg, open(path, "w"))
 PY
 chmod 600 ~/myduino-jetson-lab/.agent.json
@@ -150,6 +153,7 @@ sleep 3
 # What the settings say now (running this again keeps the teacher address or the Solo Lab that were set before).
 TEACHER="$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/myduino-jetson-lab/.agent.json'))).get('teacher',''))")"
 SOLO_ON="$(python3 -c "import json,os;print((json.load(open(os.path.expanduser('~/myduino-jetson-lab/.agent.json'))).get('solo') or {}).get('package',''))")"
+SOLO_PIN="$(python3 -c "import json,os;print((json.load(open(os.path.expanduser('~/myduino-jetson-lab/.agent.json'))).get('solo') or {}).get('pin',''))")"
 if [ -n "$TEACHER" ]; then
   if curl -s -m 5 "http://$TEACHER/" > /dev/null; then
     echo "The teacher page at $TEACHER answers. Refresh the teacher page: this Jetson should be in the list."
@@ -163,6 +167,7 @@ echo
 if [ -n "$SOLO_ON" ]; then
   echo "Solo Lab is on (package: $SOLO_ON). The student double-clicks Myduino Jetson Lab on the desktop of this Jetson:"
   echo "when the teacher has no lab for this Jetson, it makes their folder and opens JupyterLab (a few minutes the first time)."
+  [ -z "$SOLO_PIN" ] || echo "Laptop address: http://$(hostname -I | awk '{print $1}'):8880   PIN: $SOLO_PIN   (on the same network; the PIN stays the same)"
 fi
 if [ -n "$TEACHER" ]; then
   echo "Next: the teacher puts a student on this Jetson, and the student opens the address from the teacher page."
