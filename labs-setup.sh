@@ -31,11 +31,23 @@ NAME="$(printf '%s' "$NAME" | tr 'A-Z-' 'a-z_' | sed 's/[^a-z0-9_]/_/g' | cut -c
 
 echo "== Myduino Jetson Orin Nano Super Lab: setup of this Jetson =="
 echo "== 1. Python tools =="
-sudo apt update
-sudo apt install -y python3-venv python3-pip git curl mosquitto mosquitto-clients tesseract-ocr libzbar0 alsa-utils espeak-ng
+# A fresh Jetson updates itself in the first minutes and holds the lock of apt: wait for it (up to 10 minutes), try again when apt fails,
+# and never go on without the Python tools (before, the setup said OK and the students' environment could not be made).
+APT="${APT_CMD:-sudo apt -o DPkg::Lock::Timeout=600}"
+WAIT="${APT_RETRY_WAIT:-60}"
+$APT update
+for TRY in 1 2 3; do
+  $APT install -y python3-venv python3-pip git curl mosquitto mosquitto-clients tesseract-ocr libzbar0 alsa-utils espeak-ng && break
+  echo "apt did not finish (is the Jetson updating itself?): waiting $WAIT seconds, then trying again ($TRY of 3)"
+  sleep "$WAIT"
+done
+if ! dpkg -s python3-venv 2> /dev/null | grep -q "Status: install ok installed"; then
+  echo "The Python tools could not be installed (python3-venv is missing). Check the internet of the Jetson, then run this script again."
+  exit 1
+fi
 # A browser for the desktop icon. It must be the normal package: the Software app and the snap browsers (Brave, Firefox of Ubuntu 22.04) do not run on a Jetson
 # image without AppArmor. It is a separate command, so a Jetson that cannot get it still finishes the setup (the icon then tries the other browsers it finds).
-sudo apt install -y epiphany-browser || echo "Could not install epiphany-browser: the desktop icon needs a browser (sudo apt install epiphany-browser)."
+$APT install -y epiphany-browser || echo "Could not install epiphany-browser: the desktop icon needs a browser (sudo apt install epiphany-browser)."
 # The agent runs its own MQTT broker for the students (ESP32 labs, phone apps): the one of the system must not take the port.
 sudo systemctl disable --now mosquitto > /dev/null 2>&1 || true
 # jtop (used in Lab 1) needs its own service, or it says "jtop service is not active".
