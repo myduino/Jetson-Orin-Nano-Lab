@@ -33,6 +33,9 @@ echo "== Myduino Jetson Orin Nano Super Lab: setup of this Jetson =="
 echo "== 1. Python tools =="
 sudo apt update
 sudo apt install -y python3-venv python3-pip git curl mosquitto mosquitto-clients tesseract-ocr libzbar0 alsa-utils espeak-ng
+# A browser for the desktop icon. It must be the normal package: the Software app and the snap browsers (Brave, Firefox of Ubuntu 22.04) do not run on a Jetson
+# image without AppArmor. It is a separate command, so a Jetson that cannot get it still finishes the setup (the icon then tries the other browsers it finds).
+sudo apt install -y epiphany-browser || echo "Could not install epiphany-browser: the desktop icon needs a browser (sudo apt install epiphany-browser)."
 # The agent runs its own MQTT broker for the students (ESP32 labs, phone apps): the one of the system must not take the port.
 sudo systemctl disable --now mosquitto > /dev/null 2>&1 || true
 # jtop (used in Lab 1) needs its own service, or it says "jtop service is not active".
